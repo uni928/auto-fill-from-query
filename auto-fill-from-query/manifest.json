@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Fill From Query Params",
+  "version": "1.0.0",
+  "description": "Fill inputs/textareas/selects when query has key=value and the page has id/class matching the key.",
+  "permissions": [],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
