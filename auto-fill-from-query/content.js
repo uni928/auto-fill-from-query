@@ -2,19 +2,24 @@
   "use strict";
 
   // ===== 設定 =====
-  const RUN_FOR_MS = 30_000;      // 30秒間だけ動かす
-  const INTERVAL_MS = 2_000;      // 2秒に1回
-  const PREFER_CLASS = false;     // trueならclass優先、falseならid優先
-  const FILL_ONLY_IF_EMPTY = true;// 空欄のときだけ入れる（上書き防止）
+  const RUN_FOR_MS = 30_000;         // 30秒間だけ動かす
+  const INTERVAL_MS = 3_000;         // 3秒に1回
+  const PREFER_CLASS = false;        // trueならclass優先、falseならid優先
+  const FILL_ONLY_IF_EMPTY = true;   // 空欄のときだけ入れる（上書き防止）
 
-  // 「作業済み」マーキング用（競合しにくい長いclass名）
-  const DONE_CLASS = "___autofill_from_query_params__done__v1__a9f0c0c3d6b84a9e8b1f2c7f___";
+  // 処理済み印：WeakSet（高速＆副作用最小）
+  const applied = new WeakSet();
+
+  // 併用する独自属性（デバッグ/再生成対策に便利）
+  // WeakSetだけで良ければ false にしてください
+  const USE_DATA_ATTR = true;
+  const DONE_ATTR = "data-afq-done-v1"; // 競合しにくい属性名
+  // =================
 
   const SUPPORTED_SELECTOR =
     'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="image"]):not([type="file"]), textarea, select';
 
   const IGNORE_KEYS = new Set(["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"]);
-  // =================
 
   function cssEscapeSafe(s) {
     if (window.CSS && typeof CSS.escape === "function") return CSS.escape(s);
@@ -36,20 +41,23 @@
     const k = cssEscapeSafe(key);
     const byId = document.querySelectorAll(`#${k}`);
     const byClass = document.querySelectorAll(`.${k}`);
-  const byName = document.querySelectorAll(`[name="${k}"]`);
+    const byName = document.querySelectorAll(`[name="${k}"]`);
 
-  const list = PREFER_CLASS
-    ? [...byClass, ...byId, ...byName]
-    : [...byId, ...byClass, ...byName];
-  return list;
+    return PREFER_CLASS
+      ? [...byClass, ...byId, ...byName]
+      : [...byId, ...byClass, ...byName];
   }
 
   function isFillable(el) {
     if (!(el instanceof HTMLElement)) return false;
     if (!el.matches(SUPPORTED_SELECTOR)) return false;
-    if (el.classList.contains(DONE_CLASS)) return false; // 作業済みは絶対触らない
     if (el.hasAttribute("disabled")) return false;
     if (el.hasAttribute("readonly")) return false;
+
+    // 既に処理済みなら触らない
+    if (applied.has(el)) return false;
+    if (USE_DATA_ATTR && el.hasAttribute(DONE_ATTR)) return false;
+
     return true;
   }
 
@@ -107,9 +115,12 @@
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function markDone(el) {
-    // 「触った/触らないを判断した」要素は二度と処理しない
-    el.classList.add(DONE_CLASS);
+  function markDone(el, reason = "done") {
+    applied.add(el);
+    if (USE_DATA_ATTR) {
+      // 値は任意。デバッグしやすいように理由を入れています
+      el.setAttribute(DONE_ATTR, reason);
+    }
   }
 
   function applyOnce(paramMap) {
@@ -123,13 +134,13 @@
 
         // 空欄のみ（上書き防止）
         if (FILL_ONLY_IF_EMPTY && !isEmpty(el)) {
-          markDone(el);
+          markDone(el, "skip-not-empty");
           continue;
         }
 
         setNativeValue(el, value);
         fireEvents(el);
-        markDone(el);
+        markDone(el, "filled");
 
         // 同じキーを複数要素に入れたいなら break を外す
         break;
